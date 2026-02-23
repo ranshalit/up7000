@@ -7,12 +7,16 @@ import time
 import os
 import serial.tools.list_ports
 import subprocess
+import shutil as _shutil
+from pathlib import Path
 from datetime import datetime
 
 def get_video_devices():
-    # Run the command
-    result = subprocess.run(['v4l2-ctl', '--list-devices'], stdout=subprocess.PIPE, text=True)
-    output = result.stdout
+    if _shutil.which("v4l2-ctl") is None:
+        return {}
+
+    result = subprocess.run(["v4l2-ctl", "--list-devices"], stdout=subprocess.PIPE, text=True)
+    output = result.stdout or ""
 
     # Parse the output
     lines = output.strip().split('\n')
@@ -41,7 +45,10 @@ def get_video_devices():
             if device_name.startswith(name):
                 first_video = next((p for p in paths if '/dev/video' in p), None)
                 if first_video:
-                    result_dict[name] = first_video[-1]
+                    try:
+                        result_dict[name] = int(os.path.basename(first_video).replace("video", ""))
+                    except Exception:
+                        pass
                 break
 
     return result_dict
@@ -70,16 +77,35 @@ def find_camera_port(cam_product):
 PRODUCT_NAME = 'SENSIA-CAM'
 
 
-CAMERA_PORT = find_camera_port(PRODUCT_NAME)
-CAMERA_BAUD = 115200
-CAMERA_ID = get_video_devices()[PRODUCT_NAME]
-print(CAMERA_ID)
+def _default_home_dir() -> Path:
+    sudo_user = (os.environ.get("SUDO_USER") or "").strip()
+    if os.geteuid() == 0 and sudo_user:
+        candidate = Path("/home") / sudo_user
+        if candidate.is_dir():
+            return candidate
+    return Path.home()
 
-VideoSaveDir = '/home/ohad/Camera_test/video'
-ImageNameFormat = r'{frameId:08}.tiff'
+
+HEADLESS = os.environ.get("VOXI_HEADLESS", "").strip() == "1" or not os.environ.get("DISPLAY")
+
+CAMERA_PORT = os.environ.get("VOXI_CAMERA_PORT") or find_camera_port(PRODUCT_NAME)
+CAMERA_BAUD = int(os.environ.get("VOXI_CAMERA_BAUD", "115200"))
+
+_env_cam_id = (os.environ.get("VOXI_CAMERA_ID") or "").strip()
+if _env_cam_id:
+    CAMERA_ID = int(_env_cam_id)
+else:
+    CAMERA_ID = get_video_devices().get(PRODUCT_NAME, 0)
+
+VideoSaveDir = os.environ.get("VOXI_VIDEO_SAVE_DIR", str(_default_home_dir() / "Camera_test" / "video"))
+ImageNameFormat = r"{frameId:08}.tiff"
 
 def main():
     def open_serial_connection(port, baud):
+        if not port:
+            raise RuntimeError(
+                "No serial port detected for camera. Set VOXI_CAMERA_PORT (e.g. /dev/ttyUSB1) or check USB serial device."
+            )
         s = serial.Serial()
         s.port = port
         s.baudrate = baud
@@ -151,7 +177,7 @@ def main():
     init(serial_connection)
 
     if not os.path.exists(VideoSaveDir):
-        os.makedirs(VideoSaveDir)
+        os.makedirs(VideoSaveDir, exist_ok=True)
     
     doRecordVideo = False
        
@@ -160,7 +186,7 @@ def main():
             try:
                 raw_image = np.frombuffer(frame.data, dtype=np.uint16).reshape((480, 640))    
                     
-                k = cv2.waitKey(1)
+                k = -1 if HEADLESS else cv2.waitKey(1)
 
                 if k & 0xFF == ord("v"):
                     # flip video mode
@@ -180,12 +206,14 @@ def main():
                     cv2.imwrite(os.path.join(video_session_dir, ImageNameFormat.format(frameId=frameId)),
                                     raw_image)
                     if frameId % 20:
-                        image = cv2.normalize(raw_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
-                        cv2.imshow("VOXI 2", image)                    
+                        if not HEADLESS:
+                            image = cv2.normalize(raw_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+                            cv2.imshow("VOXI 2", image)                    
 
                 else:
-                    image = cv2.normalize(raw_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
-                    cv2.imshow("VOXI 2", image)    
+                    if not HEADLESS:
+                        image = cv2.normalize(raw_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+                        cv2.imshow("VOXI 2", image)    
 
                     if k & 0xFF == ord("n"):
                         nuc(serial_connection)
@@ -205,7 +233,8 @@ def main():
                 print(e)
 
 
-    cv2.destroyAllWindows()
+    if not HEADLESS:
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

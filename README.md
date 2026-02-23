@@ -10,3 +10,8 @@ https://up-board.org/up-7000/
   - `target_serial_device`: `/dev/ttyACM0`
   - `target_prompt_regex`: `(?:<username>@<username>:.*[$#]|[$#]) ?$`
 - Per top-level `README.md`, current device-side workflow often uses `.github/skills/terminal-command-inject` and `.github/skills/scp-file-copy`.
+
+## Disk backup/restore
+
+- Script: `device_code/disk_backup_restore.py`
+- Docs: `docs/disk-backup-restore.md`

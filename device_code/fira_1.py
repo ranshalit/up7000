@@ -14,6 +14,14 @@ CAMERA_PORT = os.environ.get("FIRA_CAMERA_PORT", "/dev/ttyUSB0")
 CAMERA_BAUD = int(os.environ.get("FIRA_CAMERA_BAUD", "115200"))
 
 
+def _get_env_int(*names: str, default: int) -> int:
+    for name in names:
+        raw = (os.environ.get(name) or "").strip()
+        if raw != "":
+            return int(raw)
+    return int(default)
+
+
 def _default_home_dir() -> Path:
     sudo_user = (os.environ.get("SUDO_USER") or "").strip()
     if os.geteuid() == 0 and sudo_user:
@@ -40,13 +48,52 @@ def _pick_camera_id(explicit: str) -> int:
     return min(candidates)
 
 
-CAMERA_ID = _pick_camera_id(os.environ.get("FIRA_CAMERA_ID", ""))
+CAMERA_ID = _get_env_int("FIRA1_CAMERA_ID", "FIRA_CAMERA_ID", default=2)
+
+
+def _available_video_ids() -> list[int]:
+    ids: list[int] = []
+    for p in glob.glob("/dev/video[0-9]*"):
+        base = os.path.basename(p)
+        try:
+            ids.append(int(base.replace("video", "")))
+        except ValueError:
+            pass
+    return sorted(set(ids))
+
+
+def _resolve_camera_id(requested_id: int, wait_s: float, fallbacks: list[int]) -> int:
+    requested_node = Path(f"/dev/video{int(requested_id)}")
+    deadline = time.monotonic() + max(0.0, float(wait_s))
+    while time.monotonic() < deadline:
+        if requested_node.exists():
+            return int(requested_id)
+        time.sleep(0.2)
+
+    available = _available_video_ids()
+    if int(requested_id) in available:
+        return int(requested_id)
+    for fid in fallbacks:
+        if int(fid) in available:
+            print(f"[fira_1] NOTE: /dev/video{requested_id} not found; using /dev/video{fid} instead")
+            return int(fid)
+    if available:
+        chosen = int(available[0])
+        print(f"[fira_1] NOTE: /dev/video{requested_id} not found; using /dev/video{chosen} instead")
+        return chosen
+    raise RuntimeError(
+        f"No /dev/video* devices found (requested /dev/video{requested_id}). "
+        "Check camera connection and that v4l2 devices are created."
+    )
 
 VideoSaveDir = os.environ.get("FIRA_VIDEO_SAVE_DIR", str(_default_home_dir() / "Camera_test" / "video"))
 ImageNameFormat = r"{frameId:08}.tiff"
 
 # Disable GUI if no display is available.
 HEADLESS = os.environ.get("FIRA_HEADLESS", "").strip() == "1" or not os.environ.get("DISPLAY")
+
+# How long to wait for /dev/video<id> to appear (e.g. after hotplug).
+CAMERA_WAIT_S = float(os.environ.get("FIRA_CAMERA_WAIT_S", "5"))
 
 def main():
     t_err = time.time()
@@ -116,7 +163,9 @@ def main():
 
     doRecordVideo = False
 
-    with Device.from_id(CAMERA_ID) as cam:
+    cam_id = _resolve_camera_id(CAMERA_ID, wait_s=CAMERA_WAIT_S, fallbacks=[2, 4])
+
+    with Device.from_id(cam_id) as cam:
          for frameId, frame in enumerate(cam):
             try:
                 

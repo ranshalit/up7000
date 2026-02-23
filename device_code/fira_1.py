@@ -6,14 +6,47 @@ import cv2
 import threading
 import time
 import os
+import glob
+from pathlib import Path
 from datetime import datetime
 
-CAMERA_PORT = '/dev/ttyUSB0'
-CAMERA_BAUD = 115200
-CAMERA_ID = 2
+CAMERA_PORT = os.environ.get("FIRA_CAMERA_PORT", "/dev/ttyUSB0")
+CAMERA_BAUD = int(os.environ.get("FIRA_CAMERA_BAUD", "115200"))
 
-VideoSaveDir = '/home/ohad/Camera_test/video'
-ImageNameFormat = r'{frameId:08}.tiff'
+
+def _default_home_dir() -> Path:
+    sudo_user = (os.environ.get("SUDO_USER") or "").strip()
+    if os.geteuid() == 0 and sudo_user:
+        candidate = Path("/home") / sudo_user
+        if candidate.is_dir():
+            return candidate
+    return Path.home()
+
+
+def _pick_camera_id(explicit: str) -> int:
+    if explicit.strip() != "":
+        return int(explicit)
+
+    candidates = []
+    for p in glob.glob("/dev/video[0-9]*"):
+        base = os.path.basename(p)
+        try:
+            candidates.append(int(base.replace("video", "")))
+        except ValueError:
+            pass
+    if not candidates:
+        # Keep the old default as a last resort.
+        return 2
+    return min(candidates)
+
+
+CAMERA_ID = _pick_camera_id(os.environ.get("FIRA_CAMERA_ID", ""))
+
+VideoSaveDir = os.environ.get("FIRA_VIDEO_SAVE_DIR", str(_default_home_dir() / "Camera_test" / "video"))
+ImageNameFormat = r"{frameId:08}.tiff"
+
+# Disable GUI if no display is available.
+HEADLESS = os.environ.get("FIRA_HEADLESS", "").strip() == "1" or not os.environ.get("DISPLAY")
 
 def main():
     t_err = time.time()
@@ -77,7 +110,7 @@ def main():
     init(serial_connection)
 
     if not os.path.exists(VideoSaveDir):
-        os.makedirs(VideoSaveDir)
+        os.makedirs(VideoSaveDir, exist_ok=True)
 
     autoCalicrationOff(serial_connection)
 
@@ -95,7 +128,7 @@ def main():
                 # Swap endianness
                 raw_image = raw_image.byteswap()                  
 
-                k = cv2.waitKey(1)
+                k = -1 if HEADLESS else cv2.waitKey(1)
 
                 if k & 0xFF == ord("v"):
                     
@@ -118,11 +151,13 @@ def main():
 
                     if frameId % 20:
                          # Display grayscale image
-                        image = cv2.normalize(raw_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
-                        cv2.imshow('FIRA1', image)
+                        if not HEADLESS:
+                            image = cv2.normalize(raw_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+                            cv2.imshow('FIRA1', image)
                 else:
-                    image = cv2.normalize(raw_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
-                    cv2.imshow("FIRA1", image)
+                    if not HEADLESS:
+                        image = cv2.normalize(raw_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+                        cv2.imshow("FIRA1", image)
                         
                     if k & 0xFF == ord("n"):
                         nuc(serial_connection)
@@ -152,7 +187,8 @@ def main():
                 t_err = time.time()
 
 
-    cv2.destroyAllWindows()
+    if not HEADLESS:
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

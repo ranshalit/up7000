@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import sys
 from typing import Optional
 
@@ -13,6 +14,13 @@ def _setenv_if(name: str, value: Optional[str]) -> None:
     os.environ[name] = v
 
 
+def _parse_video_device(dev: str) -> int:
+    m = re.fullmatch(r"/dev/video(\d+)", (dev or "").strip())
+    if not m:
+        raise argparse.ArgumentTypeError(f"Invalid --video-device {dev!r} (expected like /dev/video4)")
+    return int(m.group(1))
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generic VOXI camera runner (wraps voxi_1.py)")
 
@@ -21,6 +29,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=int,
         default=None,
         help="V4L2 camera numeric id (maps to /dev/videoN). Sets VOXI_CAMERA_ID.",
+    )
+    p.add_argument(
+        "--video-device",
+        type=_parse_video_device,
+        default=None,
+        help="Convenience alternative to --camera-id (e.g. /dev/video2).",
     )
     p.add_argument(
         "--serial-device",
@@ -44,6 +58,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
     p.add_argument("--headless", action="store_true", help="Force VOXI_HEADLESS=1")
     p.add_argument("--gui", action="store_true", help="Force VOXI_HEADLESS=0")
+
+    p.add_argument(
+        "--no-reexec",
+        action="store_true",
+        help="Disable voxi_1 venv re-exec (sets VOXI_NO_REEXEC=1). Useful for GUI/X11-forwarding when venv OpenCV is headless.",
+    )
 
     p.add_argument(
         "--max-bad-frames",
@@ -98,7 +118,14 @@ def main(argv: list[str] | None = None) -> None:
     if args.headless and args.gui:
         raise SystemExit("Use only one of --headless or --gui")
 
-    _setenv_if("VOXI_CAMERA_ID", None if args.camera_id is None else str(int(args.camera_id)))
+    if args.camera_id is not None and args.video_device is not None and int(args.camera_id) != int(args.video_device):
+        raise SystemExit(
+            f"Conflicting options: --camera-id {args.camera_id} != --video-device /dev/video{args.video_device}"
+        )
+
+    camera_id = args.camera_id if args.camera_id is not None else args.video_device
+
+    _setenv_if("VOXI_CAMERA_ID", None if camera_id is None else str(int(camera_id)))
     _setenv_if("VOXI_CAMERA_PORT", args.serial_device)
     _setenv_if("VOXI_CAMERA_BAUD", None if args.baud is None else str(int(args.baud)))
     _setenv_if("VOXI_VIDEO_SAVE_DIR", args.save_dir)
@@ -113,6 +140,9 @@ def main(argv: list[str] | None = None) -> None:
         os.environ["VOXI_HEADLESS"] = "1"
     if args.gui:
         os.environ["VOXI_HEADLESS"] = "0"
+
+    if args.no_reexec:
+        os.environ["VOXI_NO_REEXEC"] = "1"
 
     _apply_kv(args.set)
 

@@ -94,6 +94,11 @@ def _maybe_reexec_in_venv() -> None:
     This is intentionally simple: if ~/fira-venv exists, re-exec into it once.
     """
 
+    # Allow disabling re-exec (useful for X11-forwarding/GUI debugging when the venv
+    # has different OpenCV build/deps than system python).
+    if (os.environ.get("VOXI_NO_REEXEC") or "").strip() == "1":
+        return
+
     # Prevent loops.
     if os.environ.get("VOXI_REEXEC", "") == "1":
         return

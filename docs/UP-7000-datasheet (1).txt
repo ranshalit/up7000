@@ -1,0 +1,155 @@
+0
+8           UP 7000
+            UP 7000 Developer Board with Intel® Processor N-series Processor (formerly Alder Lake-N)
+UP Boards
+
+
+
+
+                                                                                          Features
+                                                                                            Intel® Processor N-series
+                                              40-pin GPIO
+                                                                                            Onboard LPDDR5 Memory, up to 8GB
+                                                                                            Onboard eMMC Storage, up to 64GB
+                                                                                            1Gigabit LAN x 1
+                                                                                            HDMI 1.4b x 1
+                                                                                            USB 3.2 Gen 2 (Type-A) x 3, 10-pin USB 2.0 x 2/UART x 1
+             USB 2.0 x 2/
+                                                                                            40-pin GPIO x 1
+             UART wafer x 1                                                                 12V DC-in, 5A
+                                                                                            TPM 2.0
+
+                Front panel
+                wafer
+
+
+
+                                DC Jack
+
+
+                                                                                          Specifications
+                                                     HDMI x 1/USB 3.2 x 1
+                                                                                          System
+                                                                                                                        Intel® Processor N200
+                                           LAN x 1                          USB 3.2 x 2
+                                                                                                                        Intel® Processor N97
+                                                                                          Processor                     Intel® Processor N100
+                                                                                                                        Intel® Processor N50
+                                                                                                                        (formerly Alder Lake-N)
+                                                                                          Graphics                      Intel® UHD Graphics
+                                                                                          Memory                        Dual-Channel LPDDR5, up to 8GB
+                                                                                          Storage                       Up to 64GB eMMC
+                                                                                                                        HDMI 1.4b/USB 3.2 Gen 2 STACK Connector x 1 (Type-A)
+                                                                                                                        4-pin Front Panel x 1
+                                                                                          I/O
+                                                                                                                        2-pin Fan Wafer x 1 (12V)
+                                                                                                                        2-pin RTC Battery Wafer x 1
+                               Power Button
+                                                                                          Camera                        —
+                                                                                                                        USB 3.2 Gen 2 (Type-A) x 3
+                                                                                          USB
+                                                                                                                        10-pin USB 2.0 x 2/UART x 1
+                                                                                          Expansion                     40-pin GPIO x 1
+                                                                                          Display Interface             HDMI 1.4b x 1
+                                                                                          Ethernet                      1GbE RJ-45 x 1 (Realtek RTL8111H CG)
+                                                                                          Security                      Onboard TPM 2.0
+                                                                                          RTC                           Yes
+                                                                                                                        Windows® 10 Enterprise LTSC 2021
+                                                                                          OS Support
+                                                                                                                        Linux: Ubuntu 22.04 LTS/Kernel 5.15, Yocto 4.0
+                                                                                          Power Requirement
+                                                                                          Power                         12V DC-in, 5A
+                                                                                          Power Supply Type             AT (default) /ATX
+                                                                                          Power Consumption (Typical)   30~36W
+                                                                                          Mechanical
+                                                                                          Dimension                     3.34” x 2.20” (85mm x 56mm)
+                                                                                          Net Weight                    0.33 lb. (0.15Kg)
+                                                                                          Gross Weight                  0.44 lb. (0.20Kg)
+                                                                                          Environment
+                                                                                          Operating Temperature         32°F ~ 140°F (0°C ~ 60°C) / 0.5 airflow
+                                                                                          Operation Humidity            0% ~ 90% relative humidity, non-condensing
+                                                                                          MTBF                          685,218 Hours
+                                                                                          Certification                 CE/FCC Class A, RoHS Compliant, REACH
+
+
+
+
+                                                                                                                  Note: All specifications are subject to change without notice.
+                              2023/08/15
+                                                                                                                                                                                                                0
+                                                                                                                                                                                                     UP 7000    8
+
+Block Diagram
+
+
+
+
+                                                                                                                                                                                                                UP Boards
+                                                                                                                                              x32             LPDDR5 x1     1R/2R 4800MT/s
+                                                                                                                                                              MAX 8GB
+                                                                                       PCIE x1 #4
+                       RJ45 CONNECTOR                              RTL8111H
+
+                                                                                                                                                             TPM 2.0 SLB9670
+
+                                                                                                                 INTEL                        SPI              BIOS
+                                                                                                                 Alder Lake N                                  256Mb Flash ROM
+                                                                                      eMMC
+                                                                     eMMC
+
+                                                                                                                35 mm x 24 mm                                  BIOS/CPLD
+                                                                                                                                                               Flash CONN
+                                                                                                                                                               12 PIN
+                                                                                                                     TDP 6W/12W                                                     SPI.I2C.I2S
+                                                                                                                                                                                    ADC.PWM.
+                                                                                                                                                                                    UART.GPIO
+                                                                                    USB3.2 x1 #3                                                       Altera                                     HAT 40 PIN
+                               USB TYPE A                                                                                                              MAX V 5M160ZM100C5N                        2*20 Header
+                                                                                    USB2.0 x1 #3
+
+                                   HDMI 1.4                                                DDIB
+
+
+
+
+                                                                                                                                        USB3.2 x2 #1,2       USB TYPE A
+                                                                                                                                        USB2 x2 #1,2         dual stack connector
+
+                                                Pitch 1.0mm conn                      USB2 x2 #4,5
+                                                10 PIN                                UART1
+
+
+
+
+                                                                                                                                                              FAN CONN
+
+
+
+
+Dimension                               Unit: mm
+
+
+
+
+Ordering Information                                                                                                      Optional Accessories
+    PART NUMBER              CPU              CORE           TDP                    LPDDR5                  MEMORY          Part Number                  Description
+ UP-ADLN50-A10-0432    N50               2             6W                     4GB                    32GB                   EP-PS12V5A60WFJ              12V@5A Power Supply
+ UP-ADLN100-A10-0432   N100              4             6W                     4GB                    32GB
+                                                                                                                            EP-CBPC125V3PUS              US Type Power Cord Plug 1800±30mm
+                                                                                                                            EP-CBPC250V3PEU              EU Type Power Cord Plug 1800±30mm
+ UP-ADLN100-A10-0864   N100              4             6W                     8GB                    64GB                   EP-CBPC250V3PUK              UK Type Power Cord Plug 1800±30mm
+ UP-ADLN97-A10-0432    N97               4             12W                    4GB                    32GB                   EP-CBUSB10PFL01              USB 2.0 Type A to 10-pin header cable
+ UP-ADLN97-A10-0864    N97               4             12W                    8GB                    64GB
+
+ UP-ADLN200-A10-0864   N200              4             6W                     8GB                    64GB
+
+
+
+
+Packing List
+• UP 7000 with Passive Heatsink
+
+
+
+
+Note: All specifications are subject to change without notice.

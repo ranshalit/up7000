@@ -1,0 +1,5 @@
+# Python dependencies for the terminal-command-inject skill.
+# Installed into .github/skills/terminal-command-inject/.venv (workspace-local), not system-wide.
+
+paramiko>=3.4,<5
+pyserial>=3.5,<4

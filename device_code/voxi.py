@@ -66,6 +66,12 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     )
 
     p.add_argument(
+        "--strict-camera-id",
+        action="store_true",
+        help="If --camera-id is provided, do not fall back to other auto-detected /dev/video* nodes (sets VOXI_STRICT_CAMERA_ID=1).",
+    )
+
+    p.add_argument(
         "--max-bad-frames",
         type=int,
         default=None,
@@ -143,6 +149,9 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     if args.no_reexec:
         os.environ["VOXI_NO_REEXEC"] = "1"
+
+    if args.strict_camera_id:
+        os.environ["VOXI_STRICT_CAMERA_ID"] = "1"
 
     _apply_kv(args.set)
 

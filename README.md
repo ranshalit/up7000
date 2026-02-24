@@ -25,7 +25,12 @@ To avoid needing to source after a reset, run the scripts with the venv interpre
 ## Run
 
 ### Voxi
-~/fira-venv/bin/python device_code/voxi.py --camera-id 0 --serial-device /dev/ttyACM0 --gui
+~/fira-venv/bin/python device_code/voxi.py --serial-device /dev/ttyACM0 --gui
+
+Troubleshooting:
+- If you see `QFontDatabase: Cannot find font directory .../cv2/qt/fonts`: this is a Qt/OpenCV warning (often harmless). Installing `fontconfig` and `fonts-dejavu-core` on the target usually removes it.
+- If the script prints `/dev/videoN is busy`, check who owns it with `fuser -v /dev/videoN` and stop that process.
+- If you see repeated `Frame too small ... wrong /dev/video* node`, try running without `--camera-id` (auto-detect), or try the other `/dev/video*` nodes that belong to the VOXI device (`v4l2-ctl --list-devices`).
 
 ### Fira
 ~/fira-venv/bin/python device_code/fira.py --camera-id 0 --serial-device /dev/ttyUSB0 --gui

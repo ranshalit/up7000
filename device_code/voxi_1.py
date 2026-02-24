@@ -1,4 +1,5 @@
 import atexit
+import errno
 import faulthandler
 import logging
 import os
@@ -154,6 +155,33 @@ from pathlib import Path
 from datetime import datetime
 from typing import Any
 
+
+def _describe_video_busy(devnode: str) -> str:
+    if _shutil.which("fuser") is None:
+        return ""
+    try:
+        cp = subprocess.run(["fuser", "-v", devnode], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        return (cp.stdout or "").strip()
+    except Exception:
+        return ""
+
+
+def _v4l2ctl_get_fmt(devnode: str, *, timeout_s: float = 1.0) -> str:
+    if _shutil.which("v4l2-ctl") is None:
+        return ""
+    try:
+        cp = subprocess.run(
+            ["v4l2-ctl", "-d", devnode, "--get-fmt-video"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=float(timeout_s),
+            check=False,
+        )
+        return (cp.stdout or "").strip()
+    except Exception:
+        return ""
+
 def get_video_devices(timeout_s: float = 2.0) -> dict[str, list[int]]:
     if _shutil.which("v4l2-ctl") is None:
         return {}
@@ -296,36 +324,55 @@ def _video_ids_from_sysfs_name(*needles: str) -> list[int]:
 
 
 def _pick_camera_ids(product_name: str) -> list[int]:
-    env_id = _env_flag("VOXI_CAMERA_ID")
-    if env_id:
-        return [int(env_id)]
+    return _pick_camera_ids2(product_name, allow_env=True)
+
+
+def _autodetect_product_camera_ids(product_name: str) -> list[int]:
+    """Auto-detect video ids for the target product only (no "all /dev/video*" fallback)."""
 
     # Most reliable: sysfs name matching (no external commands).
     sysfs_ids = _video_ids_from_sysfs_name(product_name, "SENSIA")
     if sysfs_ids:
-        # Keep ascending order; some devices expose a non-capture node at the higher index.
         return sorted(sysfs_ids)
 
     # Next: v4l2-ctl mapping by product name.
     timeout_s = float(_env_flag("VOXI_V4L2_CTL_TIMEOUT_S") or "5")
     mapping = get_video_devices(timeout_s=timeout_s)
     ids = mapping.get(product_name) or []
+    return sorted(set(int(i) for i in ids))
+
+
+def _pick_camera_ids2(product_name: str, *, allow_env: bool) -> list[int]:
+    env_id = _env_flag("VOXI_CAMERA_ID") if allow_env else ""
+    if env_id:
+        return [int(env_id)]
+
+    ids = _autodetect_product_camera_ids(product_name)
     if ids:
-        return sorted(ids)
+        return ids
 
     # Last resort: try all /dev/video* in ascending order.
     return _available_video_ids()
 
 
 def _frame_to_u16_image(frame: Any, *, width: int, height: int) -> np.ndarray:
-    raw = np.frombuffer(frame.data, dtype=np.uint16)
+    buf = frame.data
+    try:
+        # Some drivers occasionally return an odd byte count; trim to avoid
+        # "buffer size must be a multiple of element size" from numpy.
+        if len(buf) % 2 == 1:
+            buf = buf[:-1]
+    except Exception:
+        pass
+
+    raw = np.frombuffer(buf, dtype=np.uint16)
     needed = int(width) * int(height)
     if needed <= 0:
         raise ValueError(f"Invalid frame shape: width={width} height={height}")
     if raw.size < needed:
         raise ValueError(
             f"Frame too small: {raw.size} uint16 values (need {needed} for {height}x{width}). "
-            "This often indicates the wrong /dev/video* node was selected."
+            "This can indicate the wrong /dev/video* node was selected, or an intermittent USB/UVC short transfer."
         )
     if raw.size != needed:
         # Some drivers append metadata/padding; trim to expected size.
@@ -348,7 +395,23 @@ def main():
     headless = _is_headless()
     camera_port = _env_flag("VOXI_CAMERA_PORT") or find_camera_port(PRODUCT_NAME)
     camera_baud = int(_env_flag("VOXI_CAMERA_BAUD") or "115200")
-    camera_ids = _pick_camera_ids(PRODUCT_NAME)
+    requested_id_raw = _env_flag("VOXI_CAMERA_ID")
+    strict_camera_id = _env_flag("VOXI_STRICT_CAMERA_ID") == "1"
+
+    # Primary camera ids list.
+    camera_ids = _pick_camera_ids2(PRODUCT_NAME, allow_env=True)
+
+    # If the user forced a camera-id, optionally fall back to other *product-matched* ids
+    # if the requested node fails (prevents surprises like opening an unrelated webcam).
+    if requested_id_raw and not strict_camera_id:
+        try:
+            requested_id = int(requested_id_raw)
+        except Exception:
+            requested_id = None
+        else:
+            product_ids = _autodetect_product_camera_ids(PRODUCT_NAME)
+            if product_ids:
+                camera_ids = [requested_id] + [i for i in product_ids if int(i) != requested_id]
 
     video_save_dir = _env_flag("VOXI_VIDEO_SAVE_DIR") or str(_default_home_dir() / "Camera_test" / "video")
 
@@ -489,28 +552,78 @@ def main():
             headless = True
     max_bad_frames = int(_env_flag("VOXI_MAX_BAD_FRAMES") or "3")
 
+    # Intermittent short frames can happen on USB/V4L2. Keep the protection (fail after
+    # too many consecutive bad frames) but reduce log spam.
+    bad_warn_interval_s = float(_env_flag("VOXI_BAD_FRAME_WARN_INTERVAL_S") or "60")
+    bad_warn_burst = int(_env_flag("VOXI_BAD_FRAME_WARN_BURST") or "3")
+    stats_interval_s = float(_env_flag("VOXI_FRAME_STATS_INTERVAL_S") or "60")
+    warmup_frames = int(_env_flag("VOXI_WARMUP_FRAMES") or "5")
+
     # Try candidate camera nodes until one streams frames that match the expected shape.
     last_open_err: Exception | None = None
+    fmt_diag_done: set[int] = set()
     _set_stage("video_open")
     for cid in (camera_ids or [0]):
+        devnode = f"/dev/video{int(cid)}"
         try:
             bad_frames = 0
+            consecutive_bad = 0
+            last_bad_warn_t = 0.0
+            total_frames = 0
+            total_bad = 0
+            last_stats_t = time.monotonic()
             with Device.from_id(int(cid)) as cam:
-                print(f"[voxi_1] Using /dev/video{int(cid)}", flush=True)
+                print(f"[voxi_1] Using {devnode}", flush=True)
                 _set_stage("streaming")
                 for frameId, frame in enumerate(cam):
+                    total_frames += 1
                     try:
                         raw_image = _frame_to_u16_image(frame, width=frame_width, height=frame_height)
                         bad_frames = 0
+                        consecutive_bad = 0
                     except Exception as e:
+                        # Many cameras/drivers can emit a short/truncated buffer right
+                        # at stream start. Ignore warmup failures completely.
+                        if warmup_frames > 0 and int(frameId) < int(warmup_frames):
+                            continue
+
                         bad_frames += 1
-                        if bad_frames == 1 or bad_frames % 30 == 0:
-                            print(f"[voxi_1] WARN: {e}", flush=True)
+                        total_bad += 1
+                        consecutive_bad += 1
+
+                        now = time.monotonic()
+                        should_warn = (
+                            consecutive_bad >= max(1, bad_warn_burst)
+                            or bad_warn_interval_s <= 0
+                            or (now - last_bad_warn_t) >= max(0.0, bad_warn_interval_s)
+                        )
+                        if should_warn:
+                            last_bad_warn_t = now
+                            print(
+                                f"[voxi_1] WARN: {e} (consecutive_bad={consecutive_bad} bad_total={total_bad} total={total_frames})",
+                                flush=True,
+                            )
+                            if int(cid) not in fmt_diag_done:
+                                fmt_diag_done.add(int(cid))
+                                fmt = _v4l2ctl_get_fmt(devnode)
+                                if fmt:
+                                    print(f"[voxi_1] NOTE: {devnode} format via v4l2-ctl:\n{fmt}", flush=True)
                         if bad_frames >= max_bad_frames:
                             raise RuntimeError(
-                                f"Too many bad frames on /dev/video{int(cid)} (max_bad_frames={max_bad_frames})"
+                                f"Too many bad frames on {devnode} (max_bad_frames={max_bad_frames})"
                             ) from e
                         continue
+
+                    if stats_interval_s > 0:
+                        now = time.monotonic()
+                        if (now - last_stats_t) >= stats_interval_s:
+                            last_stats_t = now
+                            if total_frames:
+                                rate = 100.0 * float(total_bad) / float(total_frames)
+                                print(
+                                    f"[voxi_1] NOTE: {devnode} frame stats: bad={total_bad}/{total_frames} ({rate:.3f}%)",
+                                    flush=True,
+                                )
 
                     if doRecordVideo:
                         cv2.imwrite(
@@ -551,9 +664,20 @@ def main():
                 # If the iterator ends, stop trying other ids.
                 return
 
+        except OSError as e:
+            last_open_err = e
+            if getattr(e, "errno", None) == errno.EBUSY:
+                detail = _describe_video_busy(devnode)
+                msg = f"[voxi_1] NOTE: {devnode} is busy."
+                if detail:
+                    msg += "\n" + detail
+                print(msg, flush=True)
+                continue
+            print(f"[voxi_1] NOTE: {devnode} failed: {e}", flush=True)
+            continue
         except Exception as e:
             last_open_err = e
-            print(f"[voxi_1] NOTE: /dev/video{int(cid)} failed: {e}", flush=True)
+            print(f"[voxi_1] NOTE: {devnode} failed: {e}", flush=True)
             continue
 
     raise SystemExit(f"Could not open a working camera device. Last error: {last_open_err}")

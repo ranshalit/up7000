@@ -15,3 +15,17 @@ https://up-board.org/up-7000/
 
 - Script: `device_code/disk_backup_restore.py`
 - Docs: `docs/disk-backup-restore.md`
+
+# Usage
+## Python venv note
+`source ~/fira-venv/bin/activate` is not done automatically on boot because venv activation only affects the current shell session.
+
+To avoid needing to source after a reset, run the scripts with the venv interpreter explicitly, or use the wrappers which re-exec into `~/fira-venv` when available.
+
+## Run
+
+### Voxi
+~/fira-venv/bin/python device_code/voxi.py --camera-id 0 --serial-device /dev/ttyACM0 --gui
+
+### Fira
+~/fira-venv/bin/python device_code/fira.py --camera-id 0 --serial-device /dev/ttyUSB0 --gui

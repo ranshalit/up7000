@@ -2,10 +2,45 @@ import argparse
 import os
 import re
 import sys
+from typing import List, Optional
 
 
 def _env(name: str) -> str:
     return (os.environ.get(name) or "").strip()
+
+
+def _maybe_reexec_in_venv() -> None:
+    """Re-exec into ~/fira-venv if running under system python.
+
+    Virtualenv activation is per-shell, so after reboot/login the user may be
+    running the system interpreter again. This wrapper makes invocation
+    resilient by preferring the known venv interpreter when available.
+    """
+
+    if _env("FIRA_NO_REEXEC") == "1":
+        return
+
+    # Prevent loops.
+    if _env("FIRA_REEXEC") == "1":
+        return
+
+    # If already in a venv, don't re-exec.
+    try:
+        if sys.prefix != sys.base_prefix:
+            return
+    except Exception:
+        return
+
+    venv_python = os.path.expanduser("~/fira-venv/bin/python")
+    if not os.path.exists(venv_python):
+        return
+
+    try:
+        os.environ["FIRA_REEXEC"] = "1"
+        os.execv(venv_python, [venv_python, *sys.argv])
+    except Exception:
+        # If re-exec fails, continue on current interpreter.
+        return
 
 
 def _parse_video_device(dev: str) -> int:
@@ -15,7 +50,7 @@ def _parse_video_device(dev: str) -> int:
     return int(m.group(1))
 
 
-def parse_args(argv: list[str]) -> argparse.Namespace:
+def parse_args(argv: List[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generic FIRA camera runner")
 
     p.add_argument(
@@ -55,7 +90,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: Optional[List[str]] = None) -> None:
+    _maybe_reexec_in_venv()
     args = parse_args(list(sys.argv[1:] if argv is None else argv))
 
     if args.camera_id is not None and args.video_device is not None and int(args.camera_id) != int(args.video_device):

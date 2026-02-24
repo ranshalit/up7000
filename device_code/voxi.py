@@ -2,7 +2,7 @@ import argparse
 import os
 import re
 import sys
-from typing import Optional
+from typing import List, Optional
 
 
 def _setenv_if(name: str, value: Optional[str]) -> None:
@@ -21,7 +21,7 @@ def _parse_video_device(dev: str) -> int:
     return int(m.group(1))
 
 
-def parse_args(argv: list[str]) -> argparse.Namespace:
+def parse_args(argv: List[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generic VOXI camera runner (wraps voxi_1.py)")
 
     p.add_argument(
@@ -101,7 +101,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def _apply_kv(items: list[str]) -> None:
+def _apply_kv(items: List[str]) -> None:
     for item in items or []:
         if "=" not in item:
             raise SystemExit(f"Invalid --set value {item!r}. Expected KEY=VALUE.")
@@ -112,7 +112,7 @@ def _apply_kv(items: list[str]) -> None:
         os.environ[k] = v
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: Optional[List[str]] = None) -> None:
     args = parse_args(list(sys.argv[1:] if argv is None else argv))
 
     if args.headless and args.gui:

@@ -124,6 +124,13 @@ def _resolve_camera_id(requested_id: int, wait_s: float, fallbacks: list[int]) -
     available = _available_video_ids()
     if int(requested_id) in available:
         return int(requested_id)
+
+    # Strict mode: caller can pass an empty fallback list to disable probing.
+    if not fallbacks:
+        raise RuntimeError(
+            f"Requested /dev/video{requested_id} not found. "
+            "Strict camera-id mode is enabled; refusing to fall back to other /dev/video* nodes."
+        )
     for fid in fallbacks:
         if int(fid) in available:
             print(f"[fira_1] NOTE: /dev/video{requested_id} not found; using /dev/video{fid} instead")
@@ -261,12 +268,18 @@ def main():
 
     doRecordVideo = False
 
-    cam_id = _resolve_camera_id(CAMERA_ID, wait_s=CAMERA_WAIT_S, fallbacks=[2, 4])
-    candidates = [cam_id] + [i for i in [0, 1, 2, 3, 4] if i != cam_id]
-    available = _available_video_ids()
-    if available:
-        # Prefer available nodes first
-        candidates = [i for i in candidates if i in available] + [i for i in available if i not in candidates]
+    # Strict by default: do not silently switch to another /dev/video*.
+    strict_camera_id = _env_flag("FIRA_STRICT_CAMERA_ID") != "0"
+    if strict_camera_id:
+        cam_id = _resolve_camera_id(CAMERA_ID, wait_s=CAMERA_WAIT_S, fallbacks=[])
+        candidates = [cam_id]
+    else:
+        cam_id = _resolve_camera_id(CAMERA_ID, wait_s=CAMERA_WAIT_S, fallbacks=[2, 4])
+        candidates = [cam_id] + [i for i in [0, 1, 2, 3, 4] if i != cam_id]
+        available = _available_video_ids()
+        if available:
+            # Prefer available nodes first
+            candidates = [i for i in candidates if i in available] + [i for i in available if i not in candidates]
 
     if not headless:
         cv2.namedWindow("FIRA1", cv2.WINDOW_NORMAL)

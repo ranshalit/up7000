@@ -396,22 +396,11 @@ def main():
     camera_port = _env_flag("VOXI_CAMERA_PORT") or find_camera_port(PRODUCT_NAME)
     camera_baud = int(_env_flag("VOXI_CAMERA_BAUD") or "115200")
     requested_id_raw = _env_flag("VOXI_CAMERA_ID")
-    strict_camera_id = _env_flag("VOXI_STRICT_CAMERA_ID") == "1"
-
-    # Primary camera ids list.
-    camera_ids = _pick_camera_ids2(PRODUCT_NAME, allow_env=True)
-
-    # If the user forced a camera-id, optionally fall back to other *product-matched* ids
-    # if the requested node fails (prevents surprises like opening an unrelated webcam).
-    if requested_id_raw and not strict_camera_id:
-        try:
-            requested_id = int(requested_id_raw)
-        except Exception:
-            requested_id = None
-        else:
-            product_ids = _autodetect_product_camera_ids(PRODUCT_NAME)
-            if product_ids:
-                camera_ids = [requested_id] + [i for i in product_ids if int(i) != requested_id]
+    # If a camera id is explicitly provided, always be strict: use ONLY that /dev/videoN.
+    if requested_id_raw:
+        camera_ids = [int(requested_id_raw)]
+    else:
+        camera_ids = _pick_camera_ids2(PRODUCT_NAME, allow_env=True)
 
     video_save_dir = _env_flag("VOXI_VIDEO_SAVE_DIR") or str(_default_home_dir() / "Camera_test" / "video")
 
@@ -550,7 +539,9 @@ def main():
             # If X/Wayland is not accessible (common with sudo/SSH), avoid a silent failure.
             _log(f"[voxi_1] WARN: GUI init failed, falling back to headless: {e}")
             headless = True
-    max_bad_frames = int(_env_flag("VOXI_MAX_BAD_FRAMES") or "3")
+    # How many consecutive bad frames to tolerate before considering the stream unstable.
+    # With multiple UVC cameras on USB2, short bursts can happen; default is intentionally higher.
+    max_bad_frames = int(_env_flag("VOXI_MAX_BAD_FRAMES") or "30")
 
     # Intermittent short frames can happen on USB/V4L2. Keep the protection (fail after
     # too many consecutive bad frames) but reduce log spam.
@@ -559,6 +550,12 @@ def main():
     stats_interval_s = float(_env_flag("VOXI_FRAME_STATS_INTERVAL_S") or "60")
     warmup_frames = int(_env_flag("VOXI_WARMUP_FRAMES") or "5")
 
+    # If a node has a transient burst of bad frames, optionally close + reopen it a few times
+    # before falling back to other /dev/video* nodes.
+    reopen_on_bad = (_env_flag("VOXI_REOPEN_ON_BAD_FRAMES") or "1") != "0"
+    reopen_retries = int(_env_flag("VOXI_REOPEN_RETRIES") or "2")
+    reopen_sleep_s = float(_env_flag("VOXI_REOPEN_SLEEP_S") or "0.5")
+
     # Try candidate camera nodes until one streams frames that match the expected shape.
     last_open_err: Exception | None = None
     fmt_diag_done: set[int] = set()
@@ -566,103 +563,123 @@ def main():
     for cid in (camera_ids or [0]):
         devnode = f"/dev/video{int(cid)}"
         try:
-            bad_frames = 0
-            consecutive_bad = 0
-            last_bad_warn_t = 0.0
-            total_frames = 0
-            total_bad = 0
-            last_stats_t = time.monotonic()
-            with Device.from_id(int(cid)) as cam:
-                print(f"[voxi_1] Using {devnode}", flush=True)
-                _set_stage("streaming")
-                for frameId, frame in enumerate(cam):
-                    total_frames += 1
-                    try:
-                        raw_image = _frame_to_u16_image(frame, width=frame_width, height=frame_height)
-                        bad_frames = 0
-                        consecutive_bad = 0
-                    except Exception as e:
-                        # Many cameras/drivers can emit a short/truncated buffer right
-                        # at stream start. Ignore warmup failures completely.
-                        if warmup_frames > 0 and int(frameId) < int(warmup_frames):
-                            continue
+            reopen_attempt = 0
+            while True:
+                try:
+                    bad_frames = 0
+                    consecutive_bad = 0
+                    last_bad_warn_t = 0.0
+                    total_frames = 0
+                    total_bad = 0
+                    last_stats_t = time.monotonic()
 
-                        bad_frames += 1
-                        total_bad += 1
-                        consecutive_bad += 1
+                    with Device.from_id(int(cid)) as cam:
+                        print(f"[voxi_1] Using {devnode}", flush=True)
+                        _set_stage("streaming")
+                        for frameId, frame in enumerate(cam):
+                            total_frames += 1
+                            try:
+                                raw_image = _frame_to_u16_image(frame, width=frame_width, height=frame_height)
+                                bad_frames = 0
+                                consecutive_bad = 0
+                            except Exception as e:
+                                # Many cameras/drivers can emit a short/truncated buffer right
+                                # at stream start. Ignore warmup failures completely.
+                                if warmup_frames > 0 and int(frameId) < int(warmup_frames):
+                                    continue
 
-                        now = time.monotonic()
-                        should_warn = (
-                            consecutive_bad >= max(1, bad_warn_burst)
-                            or bad_warn_interval_s <= 0
-                            or (now - last_bad_warn_t) >= max(0.0, bad_warn_interval_s)
-                        )
-                        if should_warn:
-                            last_bad_warn_t = now
-                            print(
-                                f"[voxi_1] WARN: {e} (consecutive_bad={consecutive_bad} bad_total={total_bad} total={total_frames})",
-                                flush=True,
-                            )
-                            if int(cid) not in fmt_diag_done:
-                                fmt_diag_done.add(int(cid))
-                                fmt = _v4l2ctl_get_fmt(devnode)
-                                if fmt:
-                                    print(f"[voxi_1] NOTE: {devnode} format via v4l2-ctl:\n{fmt}", flush=True)
-                        if bad_frames >= max_bad_frames:
-                            raise RuntimeError(
-                                f"Too many bad frames on {devnode} (max_bad_frames={max_bad_frames})"
-                            ) from e
-                        continue
+                                bad_frames += 1
+                                total_bad += 1
+                                consecutive_bad += 1
 
-                    if stats_interval_s > 0:
-                        now = time.monotonic()
-                        if (now - last_stats_t) >= stats_interval_s:
-                            last_stats_t = now
-                            if total_frames:
-                                rate = 100.0 * float(total_bad) / float(total_frames)
-                                print(
-                                    f"[voxi_1] NOTE: {devnode} frame stats: bad={total_bad}/{total_frames} ({rate:.3f}%)",
-                                    flush=True,
+                                now = time.monotonic()
+                                should_warn = (
+                                    consecutive_bad >= max(1, bad_warn_burst)
+                                    or bad_warn_interval_s <= 0
+                                    or (now - last_bad_warn_t) >= max(0.0, bad_warn_interval_s)
                                 )
+                                if should_warn:
+                                    last_bad_warn_t = now
+                                    print(
+                                        f"[voxi_1] WARN: {e} (consecutive_bad={consecutive_bad} bad_total={total_bad} total={total_frames})",
+                                        flush=True,
+                                    )
+                                    if int(cid) not in fmt_diag_done:
+                                        fmt_diag_done.add(int(cid))
+                                        fmt = _v4l2ctl_get_fmt(devnode)
+                                        if fmt:
+                                            print(
+                                                f"[voxi_1] NOTE: {devnode} format via v4l2-ctl:\n{fmt}",
+                                                flush=True,
+                                            )
 
-                    if doRecordVideo:
-                        cv2.imwrite(
-                            os.path.join(video_session_dir, ImageNameFormat.format(frameId=frameId)),
-                            raw_image,
-                        )
-                        if frameId % 20 and not headless:
-                            image = cv2.normalize(raw_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
-                            cv2.imshow("VOXI 1", image)
-                    else:
-                        if not headless:
-                            image = cv2.normalize(raw_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
-                            cv2.imshow("VOXI 1", image)
+                                if bad_frames >= max_bad_frames:
+                                    raise RuntimeError(
+                                        f"Too many bad frames on {devnode} (max_bad_frames={max_bad_frames})"
+                                    ) from e
+                                continue
 
-                    # Call waitKey AFTER imshow so the window reliably appears/refreshes.
-                    k = -1 if headless else cv2.waitKey(1)
+                            if stats_interval_s > 0:
+                                now = time.monotonic()
+                                if (now - last_stats_t) >= stats_interval_s:
+                                    last_stats_t = now
+                                    if total_frames:
+                                        rate = 100.0 * float(total_bad) / float(total_frames)
+                                        print(
+                                            f"[voxi_1] NOTE: {devnode} frame stats: bad={total_bad}/{total_frames} ({rate:.3f}%)",
+                                            flush=True,
+                                        )
 
-                    if k & 0xFF == ord("v"):
-                        doRecordVideo = not doRecordVideo
-                        if doRecordVideo:
-                            current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            video_session_dir = os.path.join(video_save_dir, f"voxi1_session_{current_time}")
-                            os.makedirs(video_session_dir, exist_ok=True)
-                            print("VOXI 1 is now recording", flush=True)
-                        else:
-                            print("VOXI 1 STOPPED RECORDING", flush=True)
+                            if doRecordVideo:
+                                cv2.imwrite(
+                                    os.path.join(video_session_dir, ImageNameFormat.format(frameId=frameId)),
+                                    raw_image,
+                                )
+                                if frameId % 20 and not headless:
+                                    image = cv2.normalize(raw_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+                                    cv2.imshow("VOXI 1", image)
+                            else:
+                                if not headless:
+                                    image = cv2.normalize(raw_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+                                    cv2.imshow("VOXI 1", image)
 
-                    if not doRecordVideo:
-                        if k & 0xFF == ord("n"):
-                            nuc(serial_connection)
-                        if k & 0xFF == ord("r"):
-                            shutil.rmtree(video_save_dir)
-                            os.makedirs(video_save_dir, exist_ok=True)
+                            # Call waitKey AFTER imshow so the window reliably appears/refreshes.
+                            k = -1 if headless else cv2.waitKey(1)
 
-                    if k & 0xFF == 27:
+                            if k & 0xFF == ord("v"):
+                                doRecordVideo = not doRecordVideo
+                                if doRecordVideo:
+                                    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                    video_session_dir = os.path.join(video_save_dir, f"voxi1_session_{current_time}")
+                                    os.makedirs(video_session_dir, exist_ok=True)
+                                    print("VOXI 1 is now recording", flush=True)
+                                else:
+                                    print("VOXI 1 STOPPED RECORDING", flush=True)
+
+                            if not doRecordVideo:
+                                if k & 0xFF == ord("n"):
+                                    nuc(serial_connection)
+                                if k & 0xFF == ord("r"):
+                                    shutil.rmtree(video_save_dir)
+                                    os.makedirs(video_save_dir, exist_ok=True)
+
+                            if k & 0xFF == 27:
+                                return
+
+                        # If the iterator ends, stop trying other ids.
                         return
 
-                # If the iterator ends, stop trying other ids.
-                return
+                except RuntimeError as e:
+                    if reopen_on_bad and "Too many bad frames on" in str(e) and reopen_attempt < max(0, reopen_retries):
+                        reopen_attempt += 1
+                        last_open_err = e
+                        print(
+                            f"[voxi_1] NOTE: {devnode} unstable (bad-frame burst). Reopening (attempt {reopen_attempt}/{reopen_retries})...",
+                            flush=True,
+                        )
+                        time.sleep(max(0.0, float(reopen_sleep_s)))
+                        continue
+                    raise
 
         except OSError as e:
             last_open_err = e
@@ -673,6 +690,10 @@ def main():
                     msg += "\n" + detail
                 print(msg, flush=True)
                 continue
+            print(f"[voxi_1] NOTE: {devnode} failed: {e}", flush=True)
+            continue
+        except RuntimeError as e:
+            last_open_err = e
             print(f"[voxi_1] NOTE: {devnode} failed: {e}", flush=True)
             continue
         except Exception as e:

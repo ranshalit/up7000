@@ -102,6 +102,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     camera_id = args.camera_id if args.camera_id is not None else args.video_device
     if camera_id is not None:
         os.environ["FIRA_CAMERA_ID"] = str(int(camera_id))
+        # Always strict when the user explicitly provides a camera-id.
+        os.environ["FIRA_STRICT_CAMERA_ID"] = "1"
 
     if args.serial_device:
         os.environ["FIRA_CAMERA_PORT"] = str(args.serial_device)

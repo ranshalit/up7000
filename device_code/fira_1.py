@@ -153,6 +153,12 @@ HEADLESS = _is_headless()
 # How long to wait for /dev/video<id> to appear (e.g. after hotplug).
 CAMERA_WAIT_S = float(os.environ.get("FIRA_CAMERA_WAIT_S", "5"))
 
+
+def _default_lock_path(camera_id: int, camera_port: str) -> str:
+    port_base = os.path.basename((camera_port or "").strip()) or "auto"
+    safe_port = "".join(ch if (ch.isalnum() or ch in ("-", "_", ".")) else "_" for ch in port_base)
+    return f"/tmp/fira_1_{safe_port}_cam{int(camera_id)}.lock"
+
 def main():
     try:
         sys.stdout.reconfigure(line_buffering=True)
@@ -175,8 +181,8 @@ def main():
 
     serial_timeout_s = float(_env_flag("FIRA_SERIAL_TIMEOUT_S") or "1")
 
-    # Prevent multiple concurrent instances fighting over /dev/video*.
-    lock_path = _env_flag("FIRA_LOCK_FILE") or "/tmp/fira_1.lock"
+    # Prevent duplicate instance per camera/serial pair, while allowing multiple cameras.
+    lock_path = _env_flag("FIRA_LOCK_FILE") or _default_lock_path(CAMERA_ID, CAMERA_PORT)
     try:
         lock_fd = open(lock_path, "w")
         fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -184,7 +190,7 @@ def main():
         lock_fd.flush()
     except BlockingIOError:
         raise SystemExit(
-            f"[fira_1] Another instance appears to be running (lock held at {lock_path}). "
+            f"[fira_1] Another instance appears to be running for this camera/serial pair (lock held at {lock_path}). "
             "Stop the other process or remove the lock if it is stale."
         )
     t_err = time.time()

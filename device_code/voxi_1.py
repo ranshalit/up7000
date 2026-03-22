@@ -154,6 +154,7 @@ import shutil as _shutil
 from pathlib import Path
 from datetime import datetime
 from typing import Any
+from runtime_commands import HeadlessCommandReader, command_from_keypress
 from usb_camera_serial import infer_serial_port_for_video_ids
 
 
@@ -413,6 +414,26 @@ def _frame_to_u16_image(frame: Any, *, width: int, height: int) -> np.ndarray:
 
 ImageNameFormat = r"{frameId:08}.tiff"
 
+
+_COMMAND_KEY_MAP = {
+    ord("v"): "v",
+    ord("n"): "n",
+    ord("r"): "r",
+    27: "esc",
+}
+
+
+def _poll_command(headless: bool, reader: HeadlessCommandReader | None) -> str | None:
+    if headless:
+        if reader is None:
+            return None
+        return reader.poll()
+    return command_from_keypress(cv2.waitKey(1), _COMMAND_KEY_MAP)
+
+
+def _warn_unknown_command(command: str) -> None:
+    _log(f"[voxi_1] WARN: unknown command {command!r}. Supported commands: v n r esc")
+
 def main():
     _set_stage("main")
     watchdog_s = float(_env_flag("VOXI_WATCHDOG_S") or "10")
@@ -446,6 +467,10 @@ def main():
             "[voxi_1] NOTE: headless mode is enabled (no DISPLAY detected). "
             "If you expect a GUI window, run from the desktop session (not over plain SSH), "
             "avoid sudo (or use 'sudo -E'), or export DISPLAY. You can also set VOXI_HEADLESS=0.",
+            flush=True,
+        )
+        print(
+            "[voxi_1] NOTE: headless commands are read from stdin. Supported commands: v n r esc",
             flush=True,
         )
 
@@ -570,6 +595,9 @@ def main():
             # If X/Wayland is not accessible (common with sudo/SSH), avoid a silent failure.
             _log(f"[voxi_1] WARN: GUI init failed, falling back to headless: {e}")
             headless = True
+
+    command_reader = HeadlessCommandReader(_COMMAND_KEY_MAP.values()) if headless else None
+
     # How many consecutive bad frames to tolerate before considering the stream unstable.
     # With multiple UVC cameras on USB2, short bursts can happen; default is intentionally higher.
     max_bad_frames = int(_env_flag("VOXI_MAX_BAD_FRAMES") or "30")
@@ -674,10 +702,12 @@ def main():
                                     image = cv2.normalize(raw_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
                                     cv2.imshow("VOXI 1", image)
 
-                            # Call waitKey AFTER imshow so the window reliably appears/refreshes.
-                            k = -1 if headless else cv2.waitKey(1)
+                            command = _poll_command(headless, command_reader)
+                            if command is not None and command not in _COMMAND_KEY_MAP.values():
+                                _warn_unknown_command(command)
+                                command = None
 
-                            if k & 0xFF == ord("v"):
+                            if command == "v":
                                 doRecordVideo = not doRecordVideo
                                 if doRecordVideo:
                                     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -688,13 +718,13 @@ def main():
                                     print("VOXI 1 STOPPED RECORDING", flush=True)
 
                             if not doRecordVideo:
-                                if k & 0xFF == ord("n"):
+                                if command == "n":
                                     nuc(serial_connection)
-                                if k & 0xFF == ord("r"):
+                                if command == "r":
                                     shutil.rmtree(video_save_dir)
                                     os.makedirs(video_save_dir, exist_ok=True)
 
-                            if k & 0xFF == 27:
+                            if command == "esc":
                                 return
 
                         # If the iterator ends, stop trying other ids.

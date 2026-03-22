@@ -19,6 +19,7 @@ import subprocess
 import fcntl
 from pathlib import Path
 from datetime import datetime
+from runtime_commands import HeadlessCommandReader, command_from_keypress
 from usb_camera_serial import infer_serial_port_for_video_id
 
 def _find_serial_port(product_name: str) -> str:
@@ -161,6 +162,33 @@ def _default_lock_path(camera_id: int, camera_port: str) -> str:
     safe_port = "".join(ch if (ch.isalnum() or ch in ("-", "_", ".")) else "_" for ch in port_base)
     return f"/tmp/fira_1_{safe_port}_cam{int(camera_id)}.lock"
 
+
+_COMMAND_KEY_MAP = {
+    ord("v"): "v",
+    ord("n"): "n",
+    ord("r"): "r",
+    ord("a"): "a",
+    ord("A"): "A",
+    ord("+"): "+",
+    ord("-"): "-",
+    27: "esc",
+}
+
+
+def _poll_command(headless: bool, reader: HeadlessCommandReader | None) -> str | None:
+    if headless:
+        if reader is None:
+            return None
+        return reader.poll()
+    return command_from_keypress(cv2.waitKey(1), _COMMAND_KEY_MAP)
+
+
+def _warn_unknown_command(command: str) -> None:
+    print(
+        f"[fira_1] WARN: unknown command {command!r}. Supported commands: v n r a A + - esc",
+        flush=True,
+    )
+
 def main():
     try:
         sys.stdout.reconfigure(line_buffering=True)
@@ -178,6 +206,10 @@ def main():
             "[fira_1] NOTE: headless mode is enabled (no DISPLAY detected). "
             "If you expect a GUI window, run from the desktop session (not plain SSH), "
             "avoid sudo (or use 'sudo -E'), or set FIRA_HEADLESS=0.",
+            flush=True,
+        )
+        print(
+            "[fira_1] NOTE: headless commands are read from stdin. Supported commands: v n r a A + - esc",
             flush=True,
         )
 
@@ -296,6 +328,8 @@ def main():
         except Exception:
             pass
 
+    command_reader = HeadlessCommandReader(_COMMAND_KEY_MAP.values()) if headless else None
+
     last_err: Exception | None = None
     for vid in candidates:
         try:
@@ -317,13 +351,19 @@ def main():
                             image = cv2.normalize(raw_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
                             cv2.imshow("FIRA1", image)
 
-                        k = -1 if headless else cv2.waitKey(1)
+                        command = _poll_command(headless, command_reader)
+                        if command is not None and command not in _COMMAND_KEY_MAP.values():
+                            _warn_unknown_command(command)
+                            command = None
 
-                        if k & 0xFF == ord("v"):
+                        if command == "v":
                             doRecordVideo = not doRecordVideo
                             if doRecordVideo:
                                 current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-                                video_session_dir = os.path.join(VideoSaveDir, f"fira1_session_{current_time}")
+                                video_session_dir = os.path.join(
+                                    VideoSaveDir,
+                                    f"fira_cam{int(vid)}_session_{current_time}",
+                                )
                                 os.makedirs(video_session_dir, exist_ok=True)
                                 print("FIRA 1 is now recording", flush=True)
                             else:
@@ -335,21 +375,21 @@ def main():
                                 raw_image,
                             )
                         else:
-                            if k & 0xFF == ord("n"):
+                            if command == "n":
                                 nuc(serial_connection)
-                            if k & 0xFF == ord("r"):
+                            if command == "r":
                                 shutil.rmtree(VideoSaveDir)
                                 os.makedirs(VideoSaveDir, exist_ok=True)
-                            if k & 0xFF == ord("a"):
+                            if command == "a":
                                 autoFocus(serial_connection)
-                            if k & 0xFF == ord("A"):
+                            if command == "A":
                                 focusStop(serial_connection)
-                            if k & 0xFF == ord("+"):
+                            if command == "+":
                                 focusPlus(serial_connection)
-                            if k & 0xFF == ord("-"):
+                            if command == "-":
                                 focusMinus(serial_connection)
 
-                        if k & 0xFF == 27:
+                        if command == "esc":
                             return
 
                     except Exception as e:

@@ -45,6 +45,13 @@ Serial-port selection:
 - When `--camera-id` or `--video-device` selects a concrete `/dev/videoN`, the scripts first try to infer the matching `/dev/ttyUSB*` or `/dev/ttyACM*` from the shared USB branch in sysfs.
 - Keep using `--serial-device` as an explicit override if the topology is unusual or multiple cameras are attached and auto-pairing is ambiguous.
 
+Headless commands:
+- In `--headless` mode there is no OpenCV window, so runtime commands are read from stdin instead of keyboard shortcuts.
+- FIRA supported stdin commands: `v`, `n`, `r`, `a`, `A`, `+`, `-`, `esc`.
+- VOXI supported stdin commands: `v`, `n`, `r`, `esc`.
+- Example: `~/fira-venv/bin/python device_code/camera.py fira --camera-id 0 --headless`
+  then type commands followed by Enter.
+
 Troubleshooting:
 - If you see `QFontDatabase: Cannot find font directory .../cv2/qt/fonts`: this is a Qt/OpenCV warning (often harmless). Installing `fontconfig` and `fonts-dejavu-core` on the target usually removes it.
 - If the script prints `/dev/videoN is busy`, check who owns it with `fuser -v /dev/videoN` and stop that process.
@@ -90,3 +97,24 @@ So there is obvious degredation in performance.
 # TODO
 
 use generic camera scrypt with 2 difference backend devices and auto camera detection
+
+gui + without printing error
+
+drwxrwxr-x 2 ubuntu ubuntu 20480 Mar 22 12:43 fira1_session_20260322_124301
+(fira-venv) ubuntu@ubuntu-UP-ADLN01:/tmp$ ls ~/Camera_test/video/fira1_session_20260322_124300/ | wc -l
+418
+(fira-venv) ubuntu@ubuntu-UP-ADLN01:/tmp$ ls ~/Camera_test/video/fira1_session_20260322_124301 | wc -l
+393
+(fira-venv) ubuntu@ubuntu-UP-ADLN01:/tmp$ 
+
+
+headless + without printing
+489
+490
+
+
+gui + printinh
+380
+410
+
+headless+printing

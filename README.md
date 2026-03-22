@@ -32,5 +32,21 @@ Troubleshooting:
 - If the script prints `/dev/videoN is busy`, check who owns it with `fuser -v /dev/videoN` and stop that process.
 - If you see repeated `Frame too small ... wrong /dev/video* node`, try running without `--camera-id` (auto-detect), or try the other `/dev/video*` nodes that belong to the VOXI device (`v4l2-ctl --list-devices`).
 
-### Fira
-~/fira-venv/bin/python device_code/fira.py --camera-id 0 --serial-device /dev/ttyUSB0 --gui
+
+### install
+UP7000 was installed with ubuntu 24.4 (tough official docs speak of ubuntu 22.2)
+installed using hdmi connected
+configured with ip 192.168.55.1 and with login: ubuntu, password: ubuntu
+
+### Cameras
+2 cameras are supported:
+fira and voxi
+when connecting a camera you need to check 2 things:
+1. Which camera device ID is used with the new camera ( /dev/videoX ) ?
+2. Which serial device ID is used with the new camera ( /dev/ttyACMX - for voxi, /dev/ttyUSBX - for fira ) ?
+for voxi:
+python voxi.py --camera-id <camera ID> --serial-device <serial device> --gui
+python voxi.py --camera-id <camera ID> --serial-device <serial device> --gui
+e.g.:
+python voxi.py --camera-id 0 --serial-device /dev/ttyACM0 --gui
+python fira.py --camera-id 0 --serial-device /dev/ttyUSB0 --gui

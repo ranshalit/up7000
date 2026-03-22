@@ -68,7 +68,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     p.add_argument(
         "--serial-device",
         default=None,
-        help="Serial port for camera control (e.g. /dev/ttyUSB1 or /dev/ttyACM0). Overrides FIRA_CAMERA_PORT.",
+        help="Serial port for camera control (e.g. /dev/ttyUSB1 or /dev/ttyACM0). Optional override; otherwise inferred from the selected video device when possible.",
     )
     p.add_argument(
         "--baud",

@@ -19,6 +19,7 @@ import subprocess
 import fcntl
 from pathlib import Path
 from datetime import datetime
+from usb_camera_serial import infer_serial_port_for_video_id
 
 def _find_serial_port(product_name: str) -> str:
     try:
@@ -32,12 +33,6 @@ def _find_serial_port(product_name: str) -> str:
     return ""
 
 
-CAMERA_PORT = (
-    os.environ.get("FIRA1_CAMERA_PORT")
-    or os.environ.get("FIRA_CAMERA_PORT")
-    or _find_serial_port("SENSIA-CAM")
-    or "/dev/ttyUSB0"
-)
 CAMERA_BAUD = int(os.environ.get("FIRA_CAMERA_BAUD", "115200"))
 
 
@@ -89,6 +84,13 @@ def _pick_camera_id(explicit: str) -> int:
 
 
 CAMERA_ID = _get_env_int("FIRA1_CAMERA_ID", "FIRA_CAMERA_ID", default=2)
+CAMERA_PORT = (
+    os.environ.get("FIRA1_CAMERA_PORT")
+    or os.environ.get("FIRA_CAMERA_PORT")
+    or infer_serial_port_for_video_id(CAMERA_ID)
+    or _find_serial_port("SENSIA-CAM")
+    or "/dev/ttyUSB0"
+)
 
 
 def _available_video_ids() -> list[int]:

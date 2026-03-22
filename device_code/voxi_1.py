@@ -154,6 +154,7 @@ import shutil as _shutil
 from pathlib import Path
 from datetime import datetime
 from typing import Any
+from usb_camera_serial import infer_serial_port_for_video_ids
 
 
 def _describe_video_busy(devnode: str) -> str:
@@ -254,6 +255,36 @@ def find_camera_port(cam_product):
         if cam_product == port.product:
             return port.device
     return None  
+
+
+def _resolve_camera_port(camera_ids: list[int]) -> str:
+    explicit_port = _env_flag("VOXI_CAMERA_PORT")
+    if explicit_port:
+        return explicit_port
+
+    inferred = infer_serial_port_for_video_ids(camera_ids)
+    if len(camera_ids) <= 1:
+        only_id = int(camera_ids[0]) if camera_ids else None
+        if only_id is not None and only_id in inferred:
+            return inferred[only_id]
+        return find_camera_port(PRODUCT_NAME) or ""
+
+    if len(inferred) != len(camera_ids):
+        mapped = ", ".join(f"/dev/video{cid}->{port}" for cid, port in sorted(inferred.items())) or "none"
+        raise RuntimeError(
+            "Could not infer a serial port for all candidate video devices. "
+            f"Current matches: {mapped}. Pass --camera-id or --serial-device explicitly."
+        )
+
+    unique_ports = sorted(set(inferred.values()))
+    if len(unique_ports) == 1:
+        return unique_ports[0]
+
+    mapped = ", ".join(f"/dev/video{cid}->{port}" for cid, port in sorted(inferred.items()))
+    raise RuntimeError(
+        "Ambiguous serial-port auto-detection for candidate video devices: "
+        f"{mapped}. Pass --camera-id or --serial-device explicitly."
+    )
 
 # Replace with your device's VID and PID
 # TARGET_VID = "21331"
@@ -393,7 +424,6 @@ def main():
         pass
 
     headless = _is_headless()
-    camera_port = _env_flag("VOXI_CAMERA_PORT") or find_camera_port(PRODUCT_NAME)
     camera_baud = int(_env_flag("VOXI_CAMERA_BAUD") or "115200")
     requested_id_raw = _env_flag("VOXI_CAMERA_ID")
     # If a camera id is explicitly provided, always be strict: use ONLY that /dev/videoN.
@@ -401,6 +431,7 @@ def main():
         camera_ids = [int(requested_id_raw)]
     else:
         camera_ids = _pick_camera_ids2(PRODUCT_NAME, allow_env=True)
+    camera_port = _resolve_camera_port(camera_ids)
 
     video_save_dir = _env_flag("VOXI_VIDEO_SAVE_DIR") or str(_default_home_dir() / "Camera_test" / "video")
 

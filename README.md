@@ -42,11 +42,16 @@ configured with ip 192.168.55.1 and with login: ubuntu, password: ubuntu
 2 cameras are supported:
 fira and voxi
 when connecting a camera you need to check 2 things:
-1. Which camera device ID is used with the new camera ( /dev/videoX ) ?
-2. Which serial device ID is used with the new camera ( /dev/ttyACMX - for voxi, /dev/ttyUSBX - for fira ) ?
+1. Which camera device ID is used with the new camera ( /dev/video#X ) ?
+2. Which serial device ID is used with the new camera 
+   ( /dev/ttyACM#Y - for voxi, 
+     /dev/ttyUSB#Z - for fira ) ?
+Note: When connecting a single camera, you will actually see 2 devices e.g. 
+   /dev/video0, /dev/video1 , so in this case camera ID is 0
+
 for voxi:
 python voxi.py --camera-id <camera ID> --serial-device <serial device> --gui
 python voxi.py --camera-id <camera ID> --serial-device <serial device> --gui
 e.g.:
 python voxi.py --camera-id 0 --serial-device /dev/ttyACM0 --gui
-python fira.py --camera-id 0 --serial-device /dev/ttyUSB0 --gui
+python fira.py --camera-id 1 --serial-device /dev/ttyUSB0 --gui
